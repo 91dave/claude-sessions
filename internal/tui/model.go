@@ -7,8 +7,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/cursor"
-	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/91dave/claude-sessions/internal/config"
@@ -44,7 +42,7 @@ type row struct {
 
 type Model struct {
 	deps  Deps
-	input textinput.Model
+	input lineInput
 	mode  mode
 
 	all       []index.Entry
@@ -78,11 +76,7 @@ type askedMsg struct {
 }
 
 func New(deps Deps) Model {
-	input := textinput.New()
-	input.Prompt = filterPrompt
-	input.Cursor.SetMode(cursor.CursorStatic)
-	input.Focus()
-	return Model{deps: deps, input: input, loading: true}
+	return Model{deps: deps, input: lineInput{Prompt: filterPrompt}, loading: true}
 }
 
 func (m Model) Init() tea.Cmd {
@@ -104,7 +98,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-		m.input.Width = max(10, msg.Width-len(filterPrompt)-1)
 		m.scrollToCursor()
 	case loadedMsg:
 		m.loading = false
@@ -160,8 +153,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	before := m.input.Value()
-	var cmd tea.Cmd
-	m.input, cmd = m.input.Update(msg)
+	m.input.Update(msg)
 	if after := m.input.Value(); strings.HasPrefix(after, "?") {
 		m.input.SetValue(strings.TrimPrefix(after, "?"))
 		m.toggleMode()
@@ -169,7 +161,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.status = ""
 		m.refilter()
 	}
-	return m, cmd
+	return m, nil
 }
 
 func (m *Model) toggleMode() {
