@@ -26,6 +26,18 @@ func Read(dir string, alive func(int) bool) map[string]Marker {
 	return markers
 }
 
+func End(dir, sessionID string) error {
+	paths, _ := filepath.Glob(filepath.Join(dir, "*.json"))
+	for _, path := range paths {
+		if m, ok := readMarker(path); ok && m.SessionID == sessionID {
+			if err := os.Remove(path); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func readMarker(path string) (Marker, bool) {
 	var m Marker
 	data, err := os.ReadFile(path)

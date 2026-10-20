@@ -67,6 +67,22 @@ func TestOnlyJSONFilesAreMarkers(t *testing.T) {
 	}
 }
 
+func TestEndRemovesOnlyThatSessionsMarkers(t *testing.T) {
+	dir := t.TempDir()
+	writeMarker(t, dir, "100.json", `{"pid":100,"sessionId":"stale"}`)
+	writeMarker(t, dir, "101.json", `{"pid":101,"sessionId":"stale"}`)
+	writeMarker(t, dir, "200.json", `{"pid":200,"sessionId":"other"}`)
+	writeMarker(t, dir, "300.json", `{"pid":300,"sessionId":"half`)
+
+	if err := End(dir, "stale"); err != nil {
+		t.Fatal(err)
+	}
+	left, _ := filepath.Glob(filepath.Join(dir, "*.json"))
+	if len(left) != 2 {
+		t.Errorf("left %v, want the other session's marker and the half-written one", left)
+	}
+}
+
 func TestTmuxTarget(t *testing.T) {
 	m := Marker{Tmux: "cc-repos:@12.%26"}
 	if m.TmuxSession() != "cc-repos" || m.TmuxWindow() != "@12" || m.TmuxPane() != "%26" {
