@@ -80,7 +80,7 @@ func (m Model) wide() bool {
 
 func (m Model) listWidth() int {
 	if m.wide() {
-		return m.width * 45 / 100
+		return m.width * 55 / 100
 	}
 	return m.width
 }
@@ -136,14 +136,29 @@ func (m Model) listLines(width, height int) []string {
 
 type columns struct{ title, project, branch, text int }
 
+const (
+	projectWidth  = 16
+	branchWidth   = 14
+	maxTitleWidth = 50
+	columnGap     = 2
+)
+
 func layoutColumns(width int) columns {
 	avail := width - dateWidth - 3
-	if avail < 60 {
+	withMeta := avail - projectWidth - branchWidth - 2*columnGap
+	switch {
+	case withMeta < 20:
 		return columns{title: max(0, avail)}
+	case withMeta < maxTitleWidth+20+columnGap:
+		return columns{title: withMeta, project: projectWidth, branch: branchWidth}
+	default:
+		return columns{
+			title:   maxTitleWidth,
+			project: projectWidth,
+			branch:  branchWidth,
+			text:    withMeta - maxTitleWidth - columnGap,
+		}
 	}
-	c := columns{title: min(50, avail*45/100), project: 16, branch: 14}
-	c.text = max(0, avail-c.title-c.project-c.branch-6)
-	return c
 }
 
 func renderRow(e index.Entry, width int, selected bool, highlight func(string) string) string {
@@ -152,19 +167,20 @@ func renderRow(e index.Entry, width int, selected bool, highlight func(string) s
 	if e.Live {
 		mark = liveStyle.Render("●")
 	}
-	title := highlight(fit(oneLine(e.Title()), c.title))
+	cell := func(s string, w int) string { return pad(highlight(fit(oneLine(s), w)), w) }
+	title := cell(e.Title(), c.title)
 	if selected {
 		title = titleStyle.Render(title)
 	}
-	parts := []string{dimStyle.Render(e.ModTime.Format(dateFormat)), mark, title}
+	gap := strings.Repeat(" ", columnGap)
+	line := dimStyle.Render(e.ModTime.Format(dateFormat)) + " " + mark + " " + title
 	if c.project > 0 {
-		parts = append(parts,
-			" "+highlight(fit(e.Project(), c.project)),
-			" "+highlight(fit(e.Branch, c.branch)),
-			" "+dimStyle.Render(highlight(fit(e.SearchText(), c.text))),
-		)
+		line += gap + cell(e.Project(), c.project) + gap + dimStyle.Render(cell(e.Branch, c.branch))
 	}
-	return fit(strings.Join(parts, " "), width)
+	if c.text > 0 {
+		line += gap + dimStyle.Render(cell(e.SearchText(), c.text))
+	}
+	return fit(line, width)
 }
 
 func (m Model) previewLines(width, height int) []string {
