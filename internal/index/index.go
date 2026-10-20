@@ -3,6 +3,7 @@ package index
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -16,10 +17,11 @@ import (
 )
 
 type Options struct {
-	ClaudeDir string
-	CacheFile string
-	Blocklist string
-	Alive     func(pid int) bool
+	ClaudeDir    string
+	CacheFile    string
+	Blocklist    string
+	Alive        func(pid int) bool
+	PaneResolver func(live.Marker) string
 }
 
 type Entry struct {
@@ -29,6 +31,7 @@ type Entry struct {
 	ModTime time.Time
 	Live    bool
 	Marker  live.Marker
+	Pane    string
 }
 
 type cacheRecord struct {
@@ -65,6 +68,10 @@ func Load(opts Options) ([]Entry, error) {
 		if !record.Session.HasTurns && !running {
 			continue
 		}
+		pane := ""
+		if running && opts.PaneResolver != nil {
+			pane = opts.PaneResolver(marker)
+		}
 		entries = append(entries, Entry{
 			Session: record.Session,
 			ID:      f.id,
@@ -72,9 +79,33 @@ func Load(opts Options) ([]Entry, error) {
 			ModTime: f.modTime,
 			Live:    running,
 			Marker:  marker,
+			Pane:    pane,
 		})
 	}
 	return entries, nil
+}
+
+func Lookup(opts Options, id string) (Entry, error) {
+	paths, _ := filepath.Glob(filepath.Join(opts.ClaudeDir, "projects", "*", id+".jsonl"))
+	if len(paths) == 0 {
+		return Entry{}, fmt.Errorf("no transcript found for %s", id)
+	}
+	info, err := os.Stat(paths[0])
+	if err != nil {
+		return Entry{}, err
+	}
+	s, err := transcript.ParseFile(paths[0])
+	if err != nil {
+		return Entry{}, err
+	}
+	e := Entry{Session: s, ID: id, Path: paths[0], ModTime: info.ModTime()}
+	if marker, running := live.Read(filepath.Join(opts.ClaudeDir, "sessions"), opts.Alive)[id]; running {
+		e.Live, e.Marker = true, marker
+		if opts.PaneResolver != nil {
+			e.Pane = opts.PaneResolver(marker)
+		}
+	}
+	return e, nil
 }
 
 func transcriptFiles(projectsDir string) ([]file, error) {

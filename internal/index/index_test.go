@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/91dave/claude-sessions/internal/live"
 )
 
 const caveat = `{"type":"user","isMeta":true,"message":{"role":"user","content":"<local-command-caveat>Caveat</local-command-caveat>"}}`
@@ -106,6 +108,52 @@ func TestRunningSessionCarriesItsMarker(t *testing.T) {
 	e := f.load()[0]
 	if e.Marker.PID != 4242 || e.Marker.TmuxPane() != "%3" {
 		t.Errorf("marker = %+v", e.Marker)
+	}
+}
+
+func TestOnlyRunningSessionsAreOfferedAPane(t *testing.T) {
+	f := newFixture(t)
+	f.transcript(dead, loginOnly+reply, time.Now())
+	f.transcript("finished-session", loginOnly+reply, time.Now())
+	f.markRunning(dead, 4242, "cc-proj:@1.%3")
+	var asked []int
+	f.opts.PaneResolver = func(m live.Marker) string {
+		asked = append(asked, m.PID)
+		return "%7"
+	}
+	for _, e := range f.load() {
+		want := ""
+		if e.ID == dead {
+			want = "%7"
+		}
+		if e.Pane != want {
+			t.Errorf("%s pane = %q, want %q", e.ID, e.Pane, want)
+		}
+	}
+	if len(asked) != 1 || asked[0] != 4242 {
+		t.Errorf("resolver asked for %v", asked)
+	}
+}
+
+func TestLookupFindsASessionEvenIfTheListHidesIt(t *testing.T) {
+	f := newFixture(t)
+	f.transcript(dead, loginOnly, time.Now())
+	f.markRunning(dead, 4242, "cc-proj:@1.%3")
+	f.opts.PaneResolver = func(live.Marker) string { return "%3" }
+	if err := Block(f.opts.Blocklist, dead); err != nil {
+		t.Fatal(err)
+	}
+
+	e, err := Lookup(f.opts, dead)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e.ID != dead || e.Cwd != "/tmp/proj" || !e.Live || e.Pane != "%3" || e.Path == "" {
+		t.Errorf("entry = %+v", e)
+	}
+
+	if _, err := Lookup(f.opts, "no-such-session"); err == nil {
+		t.Error("an unknown session was found")
 	}
 }
 
