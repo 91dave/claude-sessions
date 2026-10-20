@@ -113,6 +113,14 @@ func TestTypingFiltersTheList(t *testing.T) {
 	}
 }
 
+func TestABareModifierPressLeavesTheListAlone(t *testing.T) {
+	h := newHarness(t, masthead, gateway)
+	h.send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{0}})
+	if got := len(h.visibleIDs()); got != 2 || h.m.input.Value() != "" {
+		t.Errorf("listed %d, query %q", got, h.m.input.Value())
+	}
+}
+
 func TestCtrlSSwitchesBetweenFilteringAndAsking(t *testing.T) {
 	h := newHarness(t, masthead, gateway)
 	h.key(tea.KeyCtrlS)

@@ -32,6 +32,9 @@ func TestLineInputEditing(t *testing.T) {
 		{"ctrl+u clears to the start", []tea.KeyMsg{runes("abc def"), key(tea.KeyLeft), key(tea.KeyCtrlU)}, "f"},
 		{"ctrl+k clears to the end", []tea.KeyMsg{runes("abc def"), key(tea.KeyCtrlA), key(tea.KeyRight), key(tea.KeyCtrlK)}, "a"},
 		{"ctrl+e moves to the end", []tea.KeyMsg{runes("ab"), key(tea.KeyHome), key(tea.KeyCtrlE), runes("c")}, "abc"},
+		{"a bare modifier press on Windows types nothing", []tea.KeyMsg{runes("ab"), runes("\x00"), runes("c")}, "abc"},
+		{"control characters in a paste are dropped", []tea.KeyMsg{runes("a\x1b\x07b")}, "ab"},
+		{"line breaks in a paste become spaces", []tea.KeyMsg{runes("one\r\ntwo\tthree")}, "one  two three"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

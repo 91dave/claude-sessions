@@ -56,7 +56,24 @@ func (in *lineInput) Update(msg tea.KeyMsg) {
 	}
 }
 
+func typeable(r []rune) []rune {
+	out := make([]rune, 0, len(r))
+	for _, c := range r {
+		switch {
+		case c == '\r' || c == '\n' || c == '\t':
+			out = append(out, ' ')
+		case unicode.IsPrint(c):
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
 func (in *lineInput) insert(r []rune) {
+	r = typeable(r)
+	if len(r) == 0 {
+		return
+	}
 	tail := append([]rune{}, in.value[in.pos:]...)
 	in.value = append(append(in.value[:in.pos], r...), tail...)
 	in.pos += len(r)
