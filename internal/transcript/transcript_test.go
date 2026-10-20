@@ -132,6 +132,13 @@ func TestFirstUserLineFields(t *testing.T) {
 	}
 }
 
+func TestFolderComesFromTheFirstUserLineThatHasOne(t *testing.T) {
+	s := parse(t, caveat, `{"type":"user","cwd":"/tmp/proj","gitBranch":"main","message":{"role":"user","content":"hi"}}`)
+	if s.Cwd != "/tmp/proj" || s.Branch != "main" {
+		t.Errorf("cwd, branch = %q, %q", s.Cwd, s.Branch)
+	}
+}
+
 func TestWindowsCwdGivesProjectName(t *testing.T) {
 	s := parse(t, `{"type":"user","cwd":"C:\\Code\\quartex","message":{"role":"user","content":"hi"}}`)
 	if s.Project() != "quartex" {
