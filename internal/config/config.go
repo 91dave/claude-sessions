@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 )
 
 const (
@@ -15,16 +16,26 @@ const (
 
 	TmuxOff        = "off"
 	TmuxNewSession = "new-session"
+	TmuxAuto       = "auto"
 
 	appDir = "claude-sessions"
 )
 
 type Config struct {
-	DefaultAction string `json:"defaultAction"`
-	AskModel      string `json:"askModel"`
-	ClaudeCommand string `json:"claudeCommand"`
-	Tmux          string `json:"tmux"`
-	TmuxPrefix    string `json:"tmuxPrefix"`
+	DefaultAction string   `json:"defaultAction"`
+	AskModel      string   `json:"askModel"`
+	ClaudeCommand string   `json:"claudeCommand"`
+	Tmux          string   `json:"tmux"`
+	TmuxPrefix    string   `json:"tmuxPrefix"`
+	Commands      Commands `json:"commands"`
+}
+
+type Commands struct {
+	LivePane        string `json:"livePane"`
+	Attach          string `json:"attach"`
+	ReviveTmux      string `json:"reviveTmux"`
+	PreviewRunning  string `json:"previewRunning"`
+	PreviewFinished string `json:"previewFinished"`
 }
 
 func Defaults() Config {
@@ -72,7 +83,7 @@ func (c *Config) fallBackFromInvalid() {
 	if c.DefaultAction != ActionResume && c.DefaultAction != ActionFork {
 		c.DefaultAction = d.DefaultAction
 	}
-	if c.Tmux != TmuxOff && c.Tmux != TmuxNewSession {
+	if c.Tmux != TmuxOff && c.Tmux != TmuxNewSession && c.Tmux != TmuxAuto {
 		c.Tmux = d.Tmux
 	}
 	if c.AskModel == "" {
@@ -119,11 +130,25 @@ func ResolvePaths(getenv func(string) string) (Paths, error) {
 	if claudeDir == "" {
 		claudeDir = filepath.Join(home, ".claude")
 	}
+	configFile := getenv("CLAUDE_SESSIONS_CONFIG")
+	if configFile == "" {
+		configFile = filepath.Join(configDir, appDir, "config.json")
+	}
 	return Paths{
 		ClaudeDir:  claudeDir,
-		ConfigFile: filepath.Join(configDir, appDir, "config.json"),
-		Blocklist:  filepath.Join(configDir, appDir, "blocklist"),
+		ConfigFile: configFile,
+		Blocklist:  filepath.Join(dataDir(home, configDir, getenv), appDir, "blocklist"),
 		CacheDir:   filepath.Join(cacheDir, appDir),
-		CacheFile:  filepath.Join(cacheDir, appDir, "cache.json"),
+		CacheFile:  filepath.Join(cacheDir, appDir, "cache-v2.json"),
 	}, nil
+}
+
+func dataDir(home, configDir string, getenv func(string) string) string {
+	if runtime.GOOS == "windows" {
+		return configDir
+	}
+	if dir := getenv("XDG_DATA_HOME"); dir != "" {
+		return dir
+	}
+	return filepath.Join(home, ".local", "share")
 }

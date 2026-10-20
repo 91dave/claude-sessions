@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -82,6 +83,54 @@ func TestOtherAction(t *testing.T) {
 	}
 	if (Config{DefaultAction: "fork"}).OtherAction() != "resume" {
 		t.Error("the other action of fork is not resume")
+	}
+}
+
+func TestCommandsAreReadFromTheFile(t *testing.T) {
+	path := writeConfig(t, `{"tmux":"auto","commands":{"attach":"agent-state jump {pane}","livePane":"agent-state pane {pid}"}}`)
+	c, err := Load(path, env(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Tmux != TmuxAuto {
+		t.Errorf("tmux = %q, want auto", c.Tmux)
+	}
+	if c.Commands.Attach != "agent-state jump {pane}" || c.Commands.LivePane != "agent-state pane {pid}" {
+		t.Errorf("commands = %+v", c.Commands)
+	}
+	if c.Commands.ReviveTmux != "" || c.Commands.PreviewRunning != "" || c.Commands.PreviewFinished != "" {
+		t.Errorf("unset commands are not empty: %+v", c.Commands)
+	}
+}
+
+func TestConfigPathCanBeOverridden(t *testing.T) {
+	p, err := ResolvePaths(env(map[string]string{"CLAUDE_SESSIONS_CONFIG": "/elsewhere/cs.json"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.ConfigFile != "/elsewhere/cs.json" {
+		t.Errorf("ConfigFile = %q", p.ConfigFile)
+	}
+}
+
+func TestBlocklistLivesWithUserDataOnUnix(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows keeps the blocklist beside the config")
+	}
+	p, err := ResolvePaths(env(map[string]string{"XDG_DATA_HOME": "/data"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Blocklist != "/data/claude-sessions/blocklist" {
+		t.Errorf("Blocklist = %q", p.Blocklist)
+	}
+	p, err = ResolvePaths(env(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	home, _ := os.UserHomeDir()
+	if p.Blocklist != filepath.Join(home, ".local", "share", "claude-sessions", "blocklist") {
+		t.Errorf("Blocklist = %q", p.Blocklist)
 	}
 }
 
