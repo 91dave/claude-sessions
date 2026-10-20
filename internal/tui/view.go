@@ -19,16 +19,19 @@ const (
 )
 
 var (
-	accent      = lipgloss.AdaptiveColor{Light: "#C30046", Dark: "#FF5F87"}
-	subtle      = lipgloss.AdaptiveColor{Light: "#6C6C6C", Dark: "#8A8A8A"}
-	dimStyle    = lipgloss.NewStyle().Foreground(subtle)
-	titleStyle  = lipgloss.NewStyle().Bold(true)
-	headStyle   = lipgloss.NewStyle().Bold(true).Foreground(accent)
-	liveStyle   = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#008700", Dark: "#5FD75F"})
-	matchStyle  = lipgloss.NewStyle().Foreground(accent).Underline(true)
-	cursorStyle = lipgloss.NewStyle().Foreground(accent).Bold(true)
-	errorStyle  = lipgloss.NewStyle().Foreground(accent)
-	noteStyle   = lipgloss.NewStyle().Foreground(subtle).Italic(true)
+	accent        = lipgloss.AdaptiveColor{Light: "#C30046", Dark: "#FF5F87"}
+	subtle        = lipgloss.AdaptiveColor{Light: "#6C6C6C", Dark: "#8A8A8A"}
+	dimStyle      = lipgloss.NewStyle().Foreground(subtle)
+	titleStyle    = lipgloss.NewStyle().Bold(true)
+	headStyle     = lipgloss.NewStyle().Bold(true).Foreground(accent)
+	liveStyle     = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#008700", Dark: "#5FD75F"})
+	matchStyle    = lipgloss.NewStyle().Foreground(accent).Underline(true)
+	cursorStyle   = lipgloss.NewStyle().Foreground(accent).Bold(true)
+	selectedStyle = lipgloss.NewStyle().Bold(true).
+			Foreground(lipgloss.AdaptiveColor{Light: "#1A1A1A", Dark: "#FFFFFF"}).
+			Background(lipgloss.AdaptiveColor{Light: "#E4E3E0", Dark: "#3A3A4A"})
+	errorStyle = lipgloss.NewStyle().Foreground(accent)
+	noteStyle  = lipgloss.NewStyle().Foreground(subtle).Italic(true)
 )
 
 func visibleWidth(s string) int {
@@ -161,24 +164,43 @@ func layoutColumns(width int) columns {
 	}
 }
 
+type rowStyle struct {
+	dim, live, highlight func(string) string
+}
+
+func plainText(s string) string { return s }
+
+func render(style lipgloss.Style) func(string) string {
+	return func(s string) string { return style.Render(s) }
+}
+
+func listRowStyle(highlight func(string) string) rowStyle {
+	return rowStyle{dim: render(dimStyle), live: render(liveStyle), highlight: highlight}
+}
+
+var selectedRowStyle = rowStyle{dim: plainText, live: plainText, highlight: plainText}
+
 func renderRow(e index.Entry, width int, selected bool, highlight func(string) string) string {
+	if selected {
+		return selectedStyle.Render(pad(rowText(e, width, selectedRowStyle), width))
+	}
+	return rowText(e, width, listRowStyle(highlight))
+}
+
+func rowText(e index.Entry, width int, style rowStyle) string {
 	c := layoutColumns(width)
 	mark := " "
 	if e.Live {
-		mark = liveStyle.Render("●")
+		mark = style.live("●")
 	}
-	cell := func(s string, w int) string { return pad(highlight(fit(oneLine(s), w)), w) }
-	title := cell(e.Title(), c.title)
-	if selected {
-		title = titleStyle.Render(title)
-	}
+	cell := func(s string, w int) string { return pad(style.highlight(fit(oneLine(s), w)), w) }
 	gap := strings.Repeat(" ", columnGap)
-	line := dimStyle.Render(e.ModTime.Format(dateFormat)) + " " + mark + " " + title
+	line := style.dim(e.ModTime.Format(dateFormat)) + " " + mark + " " + cell(e.Title(), c.title)
 	if c.project > 0 {
-		line += gap + cell(e.Project(), c.project) + gap + dimStyle.Render(cell(e.Branch, c.branch))
+		line += gap + cell(e.Project(), c.project) + gap + style.dim(cell(e.Branch, c.branch))
 	}
 	if c.text > 0 {
-		line += gap + dimStyle.Render(cell(e.SearchText(), c.text))
+		line += gap + style.dim(cell(e.SearchText(), c.text))
 	}
 	return fit(line, width)
 }
