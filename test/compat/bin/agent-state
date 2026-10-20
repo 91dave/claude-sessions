@@ -1,0 +1,23 @@
+#!/bin/bash
+# Stand-in for the dotfiles agent-state, implementing only the pane, preview and jump contract.
+
+STATE_DIR="${AGENT_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/agent-state}"
+
+pane_of() {
+    local state pane
+    [[ "${1:-}" =~ ^[0-9]+$ ]] || return 0
+    kill -0 "$1" 2>/dev/null || return 0
+    [[ -r "$STATE_DIR/$1" ]] || return 0
+    { read -r state; read -r pane; } < "$STATE_DIR/$1"
+    [[ -n "$pane" ]] && printf '%s\t%s\n' "$state" "$pane"
+}
+
+preview() {
+    tmux capture-pane -ep -t "$1" 2>/dev/null | tail -n "${FZF_PREVIEW_LINES:-40}"
+}
+
+case "${1:-}" in
+    pane)    pane_of "${2:-}" ;;
+    preview) preview "${2:-}" ;;
+    jump)    tmux switch-client -t "${2:-}" ;;
+esac

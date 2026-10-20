@@ -138,8 +138,10 @@ func (s *Session) absorb(e entry, users *[]entry) {
 		s.Messages++
 		if !s.HasUser {
 			s.HasUser = true
-			s.Cwd, s.Branch = e.Cwd, e.GitBranch
 			s.Started, _ = time.Parse(time.RFC3339Nano, e.Timestamp)
+		}
+		if s.Cwd == "" && e.Cwd != "" {
+			s.Cwd, s.Branch = e.Cwd, e.GitBranch
 		}
 		if len(*users) < openingPromptWindow {
 			*users = append(*users, e)

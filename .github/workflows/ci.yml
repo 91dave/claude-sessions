@@ -20,6 +20,9 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - name: tools for the bash compatibility suite
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y tmux ripgrep
       - name: gofmt
         if: runner.os == 'Linux'
         run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }

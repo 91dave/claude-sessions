@@ -2,6 +2,7 @@ package launch
 
 import (
 	"errors"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -169,6 +170,113 @@ func TestTmuxIsOffByDefault(t *testing.T) {
 	p := plan(t, config.ActionResume, entry("/tmp/proj", false, ""), config.Defaults(), env("linux", false, true, fakeTmux{}))
 	if strings.Contains(p.String(), "tmux") {
 		t.Errorf("plan = %q", p.String())
+	}
+}
+
+func withCommands(tmux string, commands config.Commands) config.Config {
+	c := cfg(tmux)
+	c.Commands = commands
+	return c
+}
+
+func TestAConfiguredAttachCommandReachesARunningSession(t *testing.T) {
+	tmux := fakeTmux{panes: map[string]bool{"%3": true}}
+	c := withCommands("off", config.Commands{Attach: "agent-state jump {pane}"})
+	p := plan(t, config.ActionResume, entry("/tmp/proj", true, "cc-proj:@1.%3"), c, env("linux", true, true, tmux))
+	if got := p.String(); got != "agent-state jump %3" {
+		t.Errorf("plan = %q", got)
+	}
+}
+
+func TestAConfiguredAttachCommandStillRefusesAnUnreachableSession(t *testing.T) {
+	c := withCommands("off", config.Commands{Attach: "agent-state jump {pane}"})
+	_, err := PlanLaunch(config.ActionResume, entry("/tmp/proj", true, "cc-proj:@1.%999"), c, env("linux", true, true, fakeTmux{}))
+	if !errors.Is(err, ErrAlreadyRunning) {
+		t.Errorf("err = %v", err)
+	}
+}
+
+func TestAConfiguredReviveCommandOpensAFreshTmuxSession(t *testing.T) {
+	c := withCommands("new-session", config.Commands{
+		ReviveTmux: "tmux new-session -d -s {tmuxName} -c {cwd} {claude} && tmux-sessions --attach {tmuxName}",
+	})
+	tmux := fakeTmux{sessions: map[string]bool{"cc-proj": true}}
+	p := plan(t, config.ActionFork, entry("/tmp/proj", false, ""), c, env("linux", true, true, tmux))
+	want := "tmux new-session -d -s cc-proj-2 -c /tmp/proj claude --resume " + id + " --fork-session && tmux-sessions --attach cc-proj-2"
+	if got := p.String(); got != want {
+		t.Errorf("plan = %q\nwant   %q", got, want)
+	}
+}
+
+func TestAutoModeOpensATmuxSessionOnlyFromOutsideTmux(t *testing.T) {
+	inside := plan(t, config.ActionResume, entry("/tmp/proj", false, ""), cfg("auto"), env("linux", true, true, fakeTmux{}))
+	if got := inside.String(); got != "cd /tmp/proj && claude --resume "+id {
+		t.Errorf("inside tmux plan = %q", got)
+	}
+	outside := plan(t, config.ActionResume, entry("/tmp/proj", false, ""), cfg("auto"), env("linux", false, true, fakeTmux{}))
+	if !strings.HasPrefix(outside.String(), "tmux new-session -d -s cc-proj ") {
+		t.Errorf("outside tmux plan = %q", outside.String())
+	}
+}
+
+func TestPaneResolverDefaultsToTheMarkersLivePane(t *testing.T) {
+	tmux := fakeTmux{panes: map[string]bool{"%3": true}}
+	resolve := PaneResolver(cfg("off"), env("linux", true, true, tmux))
+	if got := resolve(live.Marker{PID: 1, Tmux: "cc-proj:@1.%3"}); got != "%3" {
+		t.Errorf("live pane = %q", got)
+	}
+	if got := resolve(live.Marker{PID: 1, Tmux: "cc-proj:@1.%9"}); got != "" {
+		t.Errorf("gone pane = %q", got)
+	}
+	if got := resolve(live.Marker{PID: 1}); got != "" {
+		t.Errorf("no tmux target = %q", got)
+	}
+}
+
+func TestPaneResolverAsksTheConfiguredCommand(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell")
+	}
+	tmux := fakeTmux{panes: map[string]bool{"%5": true}}
+	c := withCommands("off", config.Commands{LivePane: `[ {pid} = 42 ] && printf 'working\t%%5\n'`})
+	resolve := PaneResolver(c, env("linux", true, true, tmux))
+	if got := resolve(live.Marker{PID: 42, Tmux: "cc-proj:@1.%3"}); got != "%5" {
+		t.Errorf("pane = %q, want the command's %%5", got)
+	}
+	if got := resolve(live.Marker{PID: 7}); got != "" {
+		t.Errorf("a command with no answer gave %q", got)
+	}
+	c.Commands.LivePane = `printf 'working\t%%9\n'`
+	if got := PaneResolver(c, env("linux", true, true, tmux))(live.Marker{PID: 42}); got != "" {
+		t.Errorf("a pane that has gone was offered: %q", got)
+	}
+}
+
+func TestPaneResolverNeedsTmux(t *testing.T) {
+	tmux := fakeTmux{panes: map[string]bool{"%3": true}}
+	resolve := PaneResolver(cfg("off"), env("windows", false, false, tmux))
+	if got := resolve(live.Marker{PID: 1, Tmux: "cc-proj:@1.%3"}); got != "" {
+		t.Errorf("pane = %q", got)
+	}
+}
+
+func TestResumedID(t *testing.T) {
+	cases := []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--resume", id}, id},
+		{[]string{"--model", "opus", "-r", id}, id},
+		{[]string{"--resume=" + id}, id},
+		{[]string{"--resume", id, "--fork-session"}, ""},
+		{[]string{"--model", "opus"}, ""},
+		{[]string{"--resume"}, ""},
+	}
+	for _, c := range cases {
+		got, ok := ResumedID(c.args)
+		if got != c.want || ok != (c.want != "") {
+			t.Errorf("ResumedID(%q) = %q, %v; want %q", c.args, got, ok, c.want)
+		}
 	}
 }
 
