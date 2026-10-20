@@ -54,7 +54,7 @@ func (m Model) hints() string {
 	if m.mode == modeAsk {
 		return "ask: describe the session, enter to search  •  ctrl+s or ?: back to filtering  •  esc: quit"
 	}
-	return fmt.Sprintf("enter: %s  •  ctrl+o: %s  •  ctrl+x: hide  •  ctrl+s or ?: ask  •  esc: quit  •  ● running",
+	return fmt.Sprintf("enter: %s  •  ctrl+o/alt+enter: %s  •  ctrl+x/alt+d: hide  •  alt+e: end  •  ctrl+s or ?: ask  •  esc: quit  •  ● running",
 		m.deps.Config.DefaultAction, m.deps.Config.OtherAction())
 }
 
@@ -101,18 +101,23 @@ func (m Model) body() []string {
 		return nil
 	}
 	list := m.listLines(m.listWidth(), m.listHeight())
+	preview := m.previewLines(m.previewSize())
 	if m.wide() {
-		previewWidth := m.width - m.listWidth() - 3
-		preview := m.previewLines(previewWidth, h)
 		out := make([]string, h)
 		for i := range out {
 			out[i] = pad(list[i], m.listWidth()) + dimStyle.Render(" │ ") + preview[i]
 		}
 		return out
 	}
-	previewHeight := h - len(list) - 1
 	out := append(list, dimStyle.Render(strings.Repeat("─", m.width)))
-	return append(out, m.previewLines(m.width, previewHeight)...)
+	return append(out, preview...)
+}
+
+func (m Model) previewSize() (lines, columns int) {
+	if m.wide() {
+		return m.bodyHeight(), m.width - m.listWidth() - 3
+	}
+	return m.bodyHeight() - m.listHeight() - 1, m.width
 }
 
 func (m Model) listLines(width, height int) []string {
@@ -205,23 +210,34 @@ func rowText(e index.Entry, width int, style rowStyle) string {
 	return fit(line, width)
 }
 
-func (m Model) previewLines(width, height int) []string {
+func (m Model) previewLines(height, width int) []string {
 	lines := make([]string, max(0, height))
 	e := m.selected()
 	if e == nil || height <= 0 || width <= 0 {
 		return lines
 	}
-	wrapped := strings.Split(lipgloss.NewStyle().Width(width).Render(preview(*e)), "\n")
-	start := min(m.previewOffset, max(0, len(wrapped)-1))
+	content := m.previewContent(*e, width)
+	start := min(m.previewOffset, max(0, len(content)-1))
 	for i := range lines {
-		if start+i < len(wrapped) {
-			lines[i] = fit(wrapped[start+i], width)
+		if start+i < len(content) {
+			lines[i] = fit(content[start+i], width) + ansi.ResetStyle
 		}
 	}
 	return lines
 }
 
-func preview(e index.Entry) string {
+func (m Model) previewContent(e index.Entry, width int) []string {
+	text, wrap := Summary(e), true
+	if result, ok := m.previews[e.ID]; ok && result.ok {
+		text, wrap = strings.TrimRight(result.text, "\n"), result.wrap
+	}
+	if wrap {
+		text = lipgloss.NewStyle().Width(width).Render(text)
+	}
+	return strings.Split(text, "\n")
+}
+
+func Summary(e index.Entry) string {
 	running := ""
 	if e.Live {
 		running = "   " + liveStyle.Render("● running")

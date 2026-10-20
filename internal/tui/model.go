@@ -33,6 +33,20 @@ type Deps struct {
 	Block  func(id string) error
 	Ask    func(ctx context.Context, question string, entries []index.Entry) ([]index.Entry, error)
 	Plan   func(action string, e index.Entry) (launch.Plan, error)
+	End    func(id string) error
+
+	Preview func(e index.Entry, lines, columns int) (text string, wrap bool, ok bool)
+}
+
+type previewResult struct {
+	text string
+	wrap bool
+	ok   bool
+}
+
+type previewMsg struct {
+	id string
+	previewResult
 }
 
 type row struct {
@@ -62,6 +76,9 @@ type Model struct {
 	status   string
 	plan     *launch.Plan
 	quitting bool
+
+	previews   map[string]previewResult
+	previewFor string
 }
 
 type loadedMsg struct {
@@ -76,7 +93,12 @@ type askedMsg struct {
 }
 
 func New(deps Deps) Model {
-	return Model{deps: deps, input: lineInput{Prompt: filterPrompt}, loading: true}
+	return Model{
+		deps:     deps,
+		input:    lineInput{Prompt: filterPrompt},
+		loading:  true,
+		previews: map[string]previewResult{},
+	}
 }
 
 func (m Model) Init() tea.Cmd {
@@ -95,6 +117,17 @@ func (m Model) Result() (launch.Plan, bool) {
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	next, cmd := m.update(msg)
+	if next.quitting {
+		return next, cmd
+	}
+	if fetch := next.fetchPreview(); fetch != nil {
+		return next, tea.Batch(cmd, fetch)
+	}
+	return next, cmd
+}
+
+func (m Model) update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -108,13 +141,62 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refilter()
 	case askedMsg:
 		m.showRanking(msg)
+	case previewMsg:
+		m.previews[msg.id] = msg.previewResult
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
 	return m, nil
 }
 
-func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) fetchPreview() tea.Cmd {
+	e := m.selected()
+	if e == nil || m.deps.Preview == nil {
+		m.previewFor = ""
+		return nil
+	}
+	if e.ID == m.previewFor {
+		return nil
+	}
+	m.previewFor = e.ID
+	entry, preview := *e, m.deps.Preview
+	lines, columns := m.previewSize()
+	return func() tea.Msg {
+		text, wrap, ok := preview(entry, lines, columns)
+		return previewMsg{id: entry.ID, previewResult: previewResult{text: text, wrap: wrap, ok: ok}}
+	}
+}
+
+func (m Model) handleAltKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	switch {
+	case msg.Type == tea.KeyEnter:
+		return m.pick(m.deps.Config.OtherAction())
+	case msg.Type == tea.KeyRunes && string(msg.Runes) == "d":
+		m.hideSelected()
+	case msg.Type == tea.KeyRunes && string(msg.Runes) == "e":
+		return m.endSelected()
+	}
+	return m, nil
+}
+
+func (m Model) endSelected() (Model, tea.Cmd) {
+	e := m.selected()
+	if e == nil || m.deps.End == nil {
+		return m, nil
+	}
+	if err := m.deps.End(e.ID); err != nil {
+		m.status = "could not end session: " + err.Error()
+		return m, nil
+	}
+	m.status = "ended: " + e.Title()
+	m.previewFor = ""
+	return m, m.Init()
+}
+
+func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	if msg.Alt {
+		return m.handleAltKey(msg)
+	}
 	switch msg.Type {
 	case tea.KeyCtrlC, tea.KeyEsc:
 		m.quitting = true
@@ -179,7 +261,7 @@ func (m *Model) toggleMode() {
 	m.refilter()
 }
 
-func (m Model) startAsking() (tea.Model, tea.Cmd) {
+func (m Model) startAsking() (Model, tea.Cmd) {
 	question := strings.TrimSpace(m.input.Value())
 	if question == "" || m.asking {
 		return m, nil
@@ -211,7 +293,7 @@ func (m *Model) showRanking(msg askedMsg) {
 	m.refilter()
 }
 
-func (m Model) pick(action string) (tea.Model, tea.Cmd) {
+func (m Model) pick(action string) (Model, tea.Cmd) {
 	e := m.selected()
 	if e == nil {
 		return m, nil

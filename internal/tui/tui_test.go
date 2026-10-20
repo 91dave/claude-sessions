@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -26,21 +27,38 @@ var (
 )
 
 type harness struct {
-	t       *testing.T
-	m       Model
-	blocked []string
-	asked   []string
-	ranked  []index.Entry
-	askErr  error
-	planErr error
-	planned []string
+	t         *testing.T
+	m         Model
+	blocked   []string
+	asked     []string
+	ranked    []index.Entry
+	askErr    error
+	planErr   error
+	planned   []string
+	ended     []string
+	loads     int
+	previewed []string
 }
 
 func newHarness(t *testing.T, entries ...index.Entry) *harness {
 	h := &harness{t: t}
 	h.m = New(Deps{
 		Config: config.Defaults(),
-		Load:   func() ([]index.Entry, error) { return entries, nil },
+		Load: func() ([]index.Entry, error) {
+			h.loads++
+			return entries, nil
+		},
+		End: func(id string) error {
+			h.ended = append(h.ended, id)
+			return nil
+		},
+		Preview: func(e index.Entry, lines, columns int) (string, bool, bool) {
+			if e.Pane == "" {
+				return "", false, false
+			}
+			h.previewed = append(h.previewed, fmt.Sprintf("%s %dx%d", e.Pane, columns, lines))
+			return "SENTINEL-PANE " + strings.Repeat("x", 300) + "\nsecond line", false, true
+		},
 		Block: func(id string) error {
 			h.blocked = append(h.blocked, id)
 			return nil
@@ -85,6 +103,8 @@ func (h *harness) run(cmd tea.Cmd) {
 }
 
 func (h *harness) key(k tea.KeyType) { h.send(tea.KeyMsg{Type: k}) }
+
+func (h *harness) input() string { return h.m.input.Value() }
 
 func (h *harness) typeText(s string) {
 	for _, r := range s {
@@ -277,6 +297,65 @@ func TestPreviewShowsTheSelectedSession(t *testing.T) {
 	h.key(tea.KeyDown)
 	if !strings.Contains(h.m.View(), "/qtx-logs gateway errors") {
 		t.Error("moving down did not preview the next session")
+	}
+}
+
+func TestARunningSessionWithAPaneIsPreviewedLive(t *testing.T) {
+	running := session("running-0000", "Live one", "the opening ask")
+	running.Live, running.Pane = true, "%3"
+	h := newHarness(t, running, masthead)
+
+	view := h.m.View()
+	if !strings.Contains(view, "SENTINEL-PANE") || !strings.Contains(view, "second line") {
+		t.Fatal("the live pane is not shown")
+	}
+	if strings.Contains(view, "Opening prompt") {
+		t.Error("the transcript summary is shown alongside the live pane")
+	}
+	for i, line := range strings.Split(view, "\n") {
+		if w := visibleWidth(line); w > 140 {
+			t.Errorf("line %d is %d wide: the live pane was not cut at the preview's edge", i, w)
+		}
+	}
+	if len(h.previewed) != 1 || !strings.HasPrefix(h.previewed[0], "%3 ") {
+		t.Errorf("previewed %v", h.previewed)
+	}
+
+	h.key(tea.KeyDown)
+	if !strings.Contains(h.m.View(), "Opening prompt") {
+		t.Error("a finished session does not show its summary")
+	}
+	h.key(tea.KeyUp)
+	if len(h.previewed) != 2 {
+		t.Errorf("returning to the running session did not refresh its pane: %v", h.previewed)
+	}
+}
+
+func TestAltKeysMatchTheFzfPicker(t *testing.T) {
+	h := newHarness(t, masthead, gateway)
+	h.send(tea.KeyMsg{Type: tea.KeyEnter, Alt: true})
+	if len(h.planned) != 1 || h.planned[0] != "fork "+masthead.ID {
+		t.Errorf("alt+enter planned %v", h.planned)
+	}
+
+	h = newHarness(t, masthead, gateway)
+	h.send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d"), Alt: true})
+	if len(h.blocked) != 1 || h.input() != "" {
+		t.Errorf("alt+d blocked %v, typed %q", h.blocked, h.input())
+	}
+
+	h = newHarness(t, masthead, gateway)
+	h.send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("e"), Alt: true})
+	if len(h.ended) != 1 || h.ended[0] != masthead.ID {
+		t.Errorf("alt+e ended %v", h.ended)
+	}
+	if h.loads != 2 {
+		t.Errorf("ending a session did not reload the list (%d loads)", h.loads)
+	}
+
+	h.send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("z"), Alt: true})
+	if h.input() != "" {
+		t.Errorf("an unbound alt key typed %q", h.input())
 	}
 }
 
