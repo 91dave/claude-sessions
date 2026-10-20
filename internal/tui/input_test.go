@@ -13,7 +13,7 @@ func typed(in *lineInput, keys ...tea.KeyMsg) {
 	}
 }
 
-func runes(s string) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)} }
+func runes(s string) tea.KeyMsg    { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)} }
 func key(k tea.KeyType) tea.KeyMsg { return tea.KeyMsg{Type: k} }
 
 func TestLineInputEditing(t *testing.T) {
